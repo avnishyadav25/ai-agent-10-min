@@ -1,112 +1,125 @@
-# AI Agent Coach (LangChain + Node.js)
+# AI Agent in 10 Minutes (Node.js + Claude)
 
-A 61-line LangChain JS chat CLI that answers questions about building AI agents, from the "AI agent in 10 minutes"
-tutorial.
+A minimal AI agent in one file: Claude through the official Anthropic SDK, a tool-use loop with one real tool, and
+short-term conversation memory. It is the companion code for the post
+[How to Build an AI Agent in 10 Minutes](https://avnishyadav.com/blogs/how-to-build-ai-agent-nodejs).
 
-## What it is
+## What it does
 
-`agent.js` pipes a prompt template into an OpenAI chat model and wraps it in a terminal loop. The system prompt
-makes the model an **AI Agent Coach**: it helps developers understand and build agents with LangChain and Node.js,
-answers with short JavaScript examples, steers off-topic questions back, and keeps answers under 300 words.
-
-**Why:** most agent tutorials start with many libraries at once. This is the smallest LangChain program that talks
-back, so you can see each moving part before adding memory and tools.
-
-What it is not (yet): there is no conversation memory (each question is sent on its own) and no tools, so strictly
-it is a chain, not a tool-using agent. See [Extending](#extending).
-
-## Features
-
-- One file, one command to run
-- LangChain JS `ChatPromptTemplate` + `ChatOpenAI` (`gpt-4o-mini`, temperature 0.4)
-- A ready-made "AI Agent Coach" system prompt you can edit
-- Simple terminal chat; type `exit` to quit
-
-## Architecture
-
-```mermaid
-flowchart LR
-    U([You]) -->|question| L[readline loop]
-    L --> P[ChatPromptTemplate<br/>system + your input]
-    P --> M[ChatOpenAI<br/>gpt-4o-mini]
-    M -->|answer| L
-```
-
-| Part | Where |
-|---|---|
-| Model setup | `agent.js` lines 6–10 |
-| System prompt | `agent.js` lines 12–32 |
-| Chain (`prompt.pipe(model)`) | `agent.js` line 35 |
-| Terminal loop | `agent.js` lines 37–61 |
+- Chats with Claude in your terminal (`exit` to quit), or replays three scripted messages with `--demo`.
+- Remembers the conversation: every turn is kept in an array and sent with each request.
+- Lets Claude call a tool, `get_current_time`, which reads your machine's clock. No network, shell or file access.
+- Handles the cases the loop can hit: tool errors (sent back as `is_error` results), more than 5 tool rounds in a row,
+  `max_tokens` cut-offs, refusals, and API errors (bad key, rate limit, network), with a short message instead of a
+  crash. A failed turn is removed from memory so the history stays valid.
 
 ## Quick start
 
-Requirements: **Node.js 20 or newer** (the LangChain 1.x packages need it) and an OpenAI API key.
+Requirements: Node.js 20 or newer and an Anthropic API key from the
+[Claude Console](https://platform.claude.com/).
 
 ```bash
 git clone https://github.com/avnishyadav25/ai-agent-10-min.git
 cd ai-agent-10-min
 npm install
+cp .env.example .env   # then put your key in .env (it is git-ignored)
 ```
-
-Create a `.env` file in the project root (it is git-ignored):
-
-```text
-OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
-```
-
-Run it:
 
 ```bash
-node agent.js
+npm start              # interactive chat
+npm run demo           # "my name is Avnish" -> "what's the time?" (tool) -> "what's my name?" (memory)
 ```
 
 ```text
-🤖 AI Agent ready! Type your question (or 'exit' to quit):
-
-You: What's the difference between a chain and an agent?
+# example session (your output will differ)
+You: What's the current time?
+[tool] get_current_time {}
+Agent: It's 10:42 AM on Saturday, October 3, 2026.
 ```
-
-Node prints a `MODULE_TYPELESS_PACKAGE_JSON` warning on start because `package.json` doesn't declare
-`"type": "module"`; the script still runs. Add `"type": "module"` to `package.json` to silence it.
 
 ## Environment
 
-| Name | Purpose |
+| Name | Required | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | yes | Your Anthropic API key (read from `.env` by `dotenv`) |
+| `ANTHROPIC_MODEL` | no | Model id; default `claude-opus-5-5` |
+
+## How the loop works
+
+```mermaid
+flowchart LR
+    U([You]) -->|message| H[(conversationHistory)]
+    H --> C[Claude<br/>messages.create + tools]
+    C -->|stop_reason: tool_use| T[run the tool]
+    T -->|tool_result| H
+    C -->|end_turn| A([Answer])
+```
+
+1. Your message is pushed onto `conversationHistory` (the memory).
+2. `client.messages.create({ model, max_tokens, messages, tools })` sends the whole history plus the tool list.
+3. If `stop_reason` is `"tool_use"`, the full assistant `content` is appended unchanged, every `tool_use` block is run,
+   and all results go back in **one** user message of `tool_result` blocks. Then it asks Claude again.
+4. Any other `stop_reason` ends the turn; the text blocks are the answer.
+
+Everything is in `agent.js`: tools (section 1–2), the agent and loop (3), error messages (4), the CLI (5).
+To add a tool, add a definition to `tools` and a function with the same name to `toolFunctions`.
+
+Notes on the model: Claude Opus 5.5 always uses adaptive thinking and its default effort is `medium`; this code
+leaves both at their defaults, so it also runs if you set `ANTHROPIC_MODEL` to another current model. Thinking blocks
+can appear in responses; they are kept in memory as returned and not printed.
+
+## Where it matches the post
+
+| Post | This repo |
 |---|---|
-| `OPENAI_API_KEY` | OpenAI key used by `ChatOpenAI` (read from `.env` by `dotenv`) |
+| `npm install @anthropic-ai/sdk dotenv`, CommonJS `require` | Same |
+| Memory = an array of messages sent with every call | `conversationHistory` in `createAgent` |
+| `get_current_time` tool with an empty `input_schema` | Same tool, same shape |
+| `tools` passed to `messages.create`, loop while `stop_reason === "tool_use"` | Same |
+| Push the assistant `content` (with the `tool_use` block) before the `tool_result` | Same |
+| Safety break after 5 tool calls | `MAX_TOOL_ROUNDS = 5` |
+| Demo: name, time, memory question | `npm run demo` |
 
-## Usage tips
+Where it differs, following Anthropic's docs as of 2026-10-03:
 
-- Change the coach's behaviour by editing the system prompt in `agent.js`.
-- Change `modelName` (for example `gpt-4o`) and `temperature` in `agent.js` to trade cost, speed and creativity.
-- API errors (wrong key, no credit) are not caught yet, so the program exits on the first failed question. Check
-  `OPENAI_API_KEY` if that happens.
+- Model `claude-opus-5-5` instead of `claude-3-haiku-20240307`, which was retired on 2026-04-20.
+- One assistant message and **one** user message with all `tool_result` blocks per round (the post pushes an
+  assistant + user pair per tool call, which breaks when Claude calls two tools at once).
+- The final assistant turn is stored as the full `response.content`, not just its text, and only `text` blocks are
+  printed (the post's `.map(block => block.text)` returns `undefined` for non-text blocks).
+- API errors are caught and explained; refusals and `max_tokens` cut-offs are handled.
+- An interactive chat instead of only the three hard-coded calls.
 
-## Extending
+## Tests
 
-Ideas, in the order I'd add them:
+```bash
+npm test
+```
 
-1. **Memory:** keep the message history and pass it with each question (a `MessagesPlaceholder` in the prompt).
-2. **One tool:** bind a tool (for example a docs search or a calculator) with `model.bindTools(...)` and handle tool
-   calls in a loop; that is the step that makes it an agent.
-3. **Streaming:** use `chain.stream(...)` to print answers as they arrive.
-4. **Error handling:** wrap `chain.invoke` in `try/catch` so a failed call doesn't end the session.
+Runs offline with Node's built-in test runner and a stubbed Anthropic client (no key, no network): tool round trip,
+parallel tool calls in one message, unknown/failing tools, memory carry-over, the 5-round safety break, refusals,
+and an API error raised by the real SDK client against a stubbed `fetch` (memory is rolled back).
 
-## Demo
+## Tested with
 
-- Demo video: _coming soon_ <!-- TODO: add the YouTube link -->
-- Project write-up: _coming soon_ <!-- TODO: https://avnishyadav.com/projects/ai-agent-in-10-minutes once published -->
+- `npm test`: 9/9 passing on Node 20.20.2 and Node 23.11.0, `@anthropic-ai/sdk` 0.131.0, 2026-10-03.
+- Not yet run against the live API (needs a key): that is the owner's first step.
 
-## License
+## Sources
 
-No license file has been added yet. <!-- TODO (owner): add a LICENSE file and update this line. -->
+Checked on 2026-10-03:
+
+- [Models overview](https://platform.claude.com/docs/en/about-claude/models/overview): "start with Claude Opus 5.5
+  for most workloads"; Opus 5 and Sonnet 5 listed as legacy.
+- [Model deprecations](https://platform.claude.com/docs/en/about-claude/model-deprecations): `claude-3-haiku-20240307`
+  retired 2026-04-20.
+- [Tool use overview](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview) and
+  [Handle tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls): tool
+  definition shape, `tool_result` placement, `is_error`.
+- [Handling stop reasons](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons): `tool_use`,
+  `max_tokens`, `refusal`.
+- [`@anthropic-ai/sdk` on npm](https://www.npmjs.com/package/@anthropic-ai/sdk): 0.131.0 is `latest`.
 
 ## Author
 
-Built by **Avnish Yadav**, AI automation engineer.
-
-- Website: [avnishyadav.com](https://avnishyadav.com)
-- YouTube: [@avnishcodes](https://www.youtube.com/@avnishcodes)
-- LinkedIn: [avnishyadav25](https://in.linkedin.com/in/avnishyadav25)
-- GitHub: [avnishyadav25](https://github.com/avnishyadav25)
+Built by **Avnish Yadav**: [avnishyadav.com](https://avnishyadav.com)
