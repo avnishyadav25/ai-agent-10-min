@@ -15,7 +15,7 @@ short-term conversation memory. It is the companion code for the post
 
 ## Quick start
 
-Requirements: Node.js 20 or newer and an Anthropic API key from the
+Requirements: Node.js 22 or newer (`.nvmrc` pins 22, so `nvm use` picks it) and an Anthropic API key from the
 [Claude Console](https://platform.claude.com/).
 
 ```bash
@@ -80,7 +80,7 @@ can appear in responses; they are kept in memory as returned and not printed.
 | Safety break after 5 tool calls | `MAX_TOOL_ROUNDS = 5` |
 | Demo: name, time, memory question | `npm run demo` |
 
-Where it differs, following Anthropic's docs as of 2026-10-03:
+Where it differs, following Anthropic's docs as of 2026-10-03 (SDK notes updated 2026-10-31):
 
 - Model `claude-opus-5-5` instead of `claude-3-haiku-20240307`, which was retired on 2026-04-20.
 - One assistant message and **one** user message with all `tool_result` blocks per round (the post pushes an
@@ -89,6 +89,9 @@ Where it differs, following Anthropic's docs as of 2026-10-03:
   printed (the post's `.map(block => block.text)` returns `undefined` for non-text blocks).
 - API errors are caught and explained; refusals and `max_tokens` cut-offs are handled.
 - An interactive chat instead of only the three hard-coded calls.
+- `@anthropic-ai/sdk` 1.x, which uses API version `2026-10-21` and sends the key as `Authorization: Bearer <key>`
+  instead of `X-Api-Key`. Nothing changes in `agent.js` or `.env`; a proxy that only reads `X-Api-Key` would need
+  updating. Pass only `apiKey` (or rely on `ANTHROPIC_API_KEY`): 1.x throws if a client gets two credentials.
 
 ## Tests
 
@@ -98,11 +101,12 @@ npm test
 
 Runs offline with Node's built-in test runner and a stubbed Anthropic client (no key, no network): tool round trip,
 parallel tool calls in one message, unknown/failing tools, memory carry-over, the 5-round safety break, refusals,
-and an API error raised by the real SDK client against a stubbed `fetch` (memory is rolled back).
+and an API error raised by the real SDK client against a stubbed `fetch` (memory is rolled back). The stubbed-`fetch`
+test also checks the request body, the Bearer auth header and the `2026-10-21` API version.
 
 ## Tested with
 
-- `npm test`: 9/9 passing on Node 20.20.2 and Node 23.11.0, `@anthropic-ai/sdk` 0.131.0, 2026-10-03.
+- `npm test`: 9/9 passing on Node 22.23.2, `@anthropic-ai/sdk` 1.3.0, `dotenv` 18.0.9, 2026-10-31.
 - Not yet run against the live API (needs a key): that is the owner's first step.
 
 ## Sources
@@ -118,7 +122,10 @@ Checked on 2026-10-03:
   definition shape, `tool_result` placement, `is_error`.
 - [Handling stop reasons](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons): `tool_use`,
   `max_tokens`, `refusal`.
-- [`@anthropic-ai/sdk` on npm](https://www.npmjs.com/package/@anthropic-ai/sdk): 0.131.0 is `latest`.
+- [`@anthropic-ai/sdk` on npm](https://www.npmjs.com/package/@anthropic-ai/sdk): 1.3.0 is `latest` (checked 2026-10-31).
+- [Migration guide for API version 2026-10-21](https://platform.claude.com/docs/en/api/migration-2026-10-21#typescript)
+  (SDK 1.0): Bearer auth header, one credential per client, `temperature`/`top_p`/`top_k` removed (this code sends
+  none of them).
 
 ## Author
 

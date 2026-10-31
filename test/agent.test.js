@@ -132,7 +132,7 @@ test('API error: real SDK client with a stubbed fetch throws a typed error, memo
 test('real SDK client with a stubbed fetch: request body shape and a full turn', async () => {
   const bodies = [];
   const fetch = async (url, init) => {
-    bodies.push({ url: String(url), body: JSON.parse(init.body) });
+    bodies.push({ url: String(url), body: JSON.parse(init.body), headers: new Headers(init.headers) });
     return new Response(
       JSON.stringify({
         id: 'msg_1', type: 'message', role: 'assistant', model: DEFAULT_MODEL,
@@ -149,6 +149,9 @@ test('real SDK client with a stubbed fetch: request body shape and a full turn',
   assert.equal(bodies[0].body.model, 'claude-opus-5-5');
   assert.deepEqual(bodies[0].body.messages, [{ role: 'user', content: 'hi' }]);
   assert.equal(bodies[0].body.tools[0].input_schema.type, 'object');
+  // SDK 1.x (API version 2026-10-21) sends the key as a Bearer token, not X-Api-Key.
+  assert.equal(bodies[0].headers.get('authorization'), 'Bearer test-key-not-real');
+  assert.equal(bodies[0].headers.get('anthropic-version'), '2026-10-21');
 });
 
 test('describeError covers rate limits and connection errors', () => {
